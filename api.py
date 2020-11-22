@@ -3,6 +3,16 @@ import time
 
 import keyring
 import requests
+import util
+from util import BTC, ETH
+
+
+def _quant(quantity, value, price):
+    assert quantity or value
+    assert price
+    if quantity is None:
+        return value / price, value
+    return quantity, quantity * price
 
 
 class WealthsimpleApi:
@@ -86,19 +96,15 @@ class WealthsimpleApi:
         return self._post("https://trade-service.wealthsimple.com/orders", order)
 
     def buy(self, account_id, security_id, quantity=None, value=None, dry_run=False):
-        assert quantity or value
-        if quantity is None:
-            cur_price = self.security(security_id)["quote"]["amount"]
-            quantity = value / cur_price
+        price = self.security(security_id)["quote"]["amount"]
+        q, _ = _quant(quantity, value, price)
         return self.place_order(
-            account_id, security_id, quantity, "buy_quantity", dry_run=dry_run
+            account_id, security_id, q, "buy_quantity", dry_run=dry_run
         )
 
     def sell(self, account_id, security_id, quantity=None, value=None, dry_run=False):
-        assert quantity or value
-        if quantity is None:
-            cur_price = self.security(security_id)["quote"]["amount"]
-            quantity = value / cur_price
+        price = self.security(security_id)["quote"]["amount"]
+        q, _ = _quant(quantity, value, price)
         return self.place_order(
             account_id, security_id, quantity, "sell_quantity", dry_run=dry_run
         )
@@ -120,3 +126,94 @@ class WealthsimpleApi:
         return self._get(
             f"https://trade-service.wealthsimple.com/securities/{security_id}"
         )
+
+
+class Crypto:
+    def __init__(self, email):
+        self.API = WealthsimpleApi(email)
+        res = self.API.accounts()["results"][0]
+        self.ID = res["id"]
+        self.CUSTODIAN = res["custodian_account_number"]
+
+    def buy(self, security_id, quantity=None, value=None, dry_run=False):
+        return self.API.buy(self.ID, security_id, quantity, value, dry_run)
+
+    def sell(self, security_id, quantity=None, value=None, dry_run=False):
+        return self.API.buy(self.ID, security_id, quantity, value, dry_run)
+
+    def quote(self, sec_id):
+        security = self.API.security(sec_id)
+        return {
+            "id": security["id"],
+            "symbol": security["stock"]["symbol"],
+            "name": security["stock"]["symbol"],
+            "quote": {k: security["quote"][k] for k in ["amount", "ask", "bid"]},
+            "date": security["quote"]["quote_date"],
+        }
+
+    def quotes(self, security_ids):
+        return [self.quote(s) for s in security_ids]
+
+    def summary(self):
+        res = self.API.accounts()["results"][0]
+        return {
+            "balance": res["current_balance"]["amount"],
+            "available": res["available_to_withdraw"]["amount"],
+            "withdrawn": res["withdrawn_earnings"]["amount"],
+            "positions": {
+                k: (self.quote(k)["quote"]["amount"] * v)
+                for k, v in res["position_quantities"].items()
+            },
+        }
+
+
+class Dummy:
+    def __init__(self, history_file, starting_balance):
+        self.__history = list(util.json_lines(history_file))
+        self.__history.reverse()
+        self.__state = self.__history.pop()
+        self.__summary = {
+            "balance": starting_balance,
+            "available": starting_balance,
+            "withdrawn": 0,
+            "positions": {BTC: 0, ETH: 0},
+        }
+
+    def buy(self, security_id, quantity=None, value=None, dry_run=False):
+        # TODO - account for the 1.48% processing fee
+        price = self.quote(security_id)["quote"]["amount"]
+        q, v = _quant(quantity, value, price)
+        self.__summary["balance"] -= v
+        self.__summary["available"] -= v
+        if security_id not in self.__summary["positions"]:
+            self.__summary["positions"][security_id] = 0
+        self.__summary["positions"][security_id] += q
+        return True
+
+    def sell(self, security_id, quantity=None, value=None, dry_run=False):
+        # TODO - account for the 1.48% processing fee
+        price = self.quote(security_id)["quote"]["amount"]
+        q, v = _quant(quantity, value, price)
+        self.__summary["positions"][security_id] -= q
+        self.__summary["balance"] += v
+        self.__summary["available"] += v
+        return True
+
+    def quote(self, security_id):
+        if security_id == BTC:
+            return self.__state[0]
+        elif security_id == ETH:
+            return self.__state[1]
+
+    def quotes(self, security_ids):
+        return self.__state
+
+    def tick(self):
+        self.__state = self.__history.pop()
+
+    def summary(self):
+        s = self.__summary.copy()
+        s["positions"] = {
+            k: (self.quote(k)["quote"]["amount"] * v) for k, v in s["positions"].items()
+        }
+        return s

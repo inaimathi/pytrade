@@ -20,8 +20,8 @@ def _pos(api, k, v):
     return {"quantity": v, "value": price * v, "price": price}
 
 
-def _taxed(amt):
-    return round(amt - (amt * 0.0148), 2)
+def _taxed(amt, rate):
+    return round(amt - (amt * rate), 2)
 
 
 class WealthsimpleApi:
@@ -202,23 +202,24 @@ class Dummy:
         }
 
     def buy(self, security_id, quantity=None, value=None, dry_run=False):
-        # TODO - account for the 1.48% processing fee
         price = self.quote(security_id)["quote"]["amount"]
         q, v = _quant(quantity, value, price)
         self.__summary["balance"] -= v
         self.__summary["available"] -= v
         if security_id not in self.__summary["positions"]:
             self.__summary["positions"][security_id] = 0
-        self.__summary["positions"][security_id] += q
+        real_q, real_v = _quant(quantity, _taxed(v, 0.0148), price)
+        print(f"BUYING {q}({v})[{real_q}{real_v}] at ${price}")
+        self.__summary["positions"][security_id] += real_q
         return True
 
     def sell(self, security_id, quantity=None, value=None, dry_run=False):
-        # TODO - account for the 1.48% processing fee
         price = self.quote(security_id)["quote"]["amount"]
         q, v = _quant(quantity, value, price)
+        print(f"SELLING {q}({v})[({_taxed(v, 0.0152)}] at ${price}")
         self.__summary["positions"][security_id] -= q
-        self.__summary["balance"] += v
-        self.__summary["available"] += v
+        self.__summary["balance"] += _taxed(v, 0.0152)
+        self.__summary["available"] += _taxed(v, 0.0152)
         return True
 
     def quote(self, security_id):

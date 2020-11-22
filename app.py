@@ -1,6 +1,5 @@
 import json
 import os
-import time
 
 import util
 from util import BTC, ETH
@@ -43,14 +42,10 @@ def mk_lohi_bot(security_id, bet_size, lo, hi):
         avail = summary["available"]
 
         if price >= hi:
-            if sec["price"] >= bet_size:
-                api.sell(security_id, value=bet_size)
-            elif sec["price"] > 0:
+            if sec["value"] > 0:
                 api.sell(security_id, quantity=sec["quantity"])
         elif lo >= price:
-            if avail >= bet_size:
-                api.buy(security_id, value=bet_size)
-            elif avail > 0:
+            if avail > 0:
                 api.buy(security_id, value=avail)
 
     return _bot
@@ -76,7 +71,6 @@ def mk_auto_balance_btc(keep_at, buy_threshold=0.1, sell_threshold=0.1):
                 print("CANT BUY")
                 print(f"  BTC worth {btc_val}, but don't have enough balance to top up")
             else:
-                # TODO - the min of balance and available funds
                 want = keep_at - btc_val
                 actual = min(want, summary["balance"], summary["available"])
                 print("BUYING UP")
@@ -95,46 +89,3 @@ def mk_monitor(path="~/.pytrade/history.json"):
             f.write("\n")
 
     return _bot
-
-
-# def monitor(api, path="~/.pytrade/history.json"):
-#     p = os.path.expanduser(path)
-#     while True:
-#         with open(p, "a") as f:
-#             f.write(json.dumps(api.quotes([BTC, ETH])))
-#             f.write("\n")
-#         time.sleep(60)
-
-
-# def auto_balance_btc(
-#     api, keep_at, frequency, buy_threshold=0.1, sell_threshold=0.1, dry_run=False
-# ):
-#     sell_above = keep_at + (keep_at * sell_threshold)
-#     buy_below = keep_at - (keep_at * buy_threshold)
-#     print("Starting AUTO")
-#     print(f"  run every {frequency} seconds")
-#     print(f"  keep in <{buy_below}>{keep_at}<{sell_above}>...")
-#     if dry_run:
-#         print("  NO ACTUAL TRANSACTIONS")
-#     while True:
-#         summary = api.summary()
-#         btc_val = summary["positions"][BTC]
-
-#         if btc_val > sell_above:
-#             val = btc_val - keep_at
-#             print("SELLING EXCESS")
-#             print(f"  BTC worth {btc_val}; exceeds threshold of ${sell_above}")
-#             print(f"  selling {val}")
-#             api.sell(summary["id"], BTC, value=val, dry_run=dry_run)
-#         elif buy_below > btc_val:
-#             if 0 >= summary["balance"]:
-#                 print("CANT BUY")
-#                 print(f"  BTC worth {btc_val}, but don't have enough balance to top up")
-#             else:
-#                 # TODO - the min of balance and available funds
-#                 want = keep_at - btc_val
-#                 actual = min(want, summary["balance"], summary["available"])
-#                 print("BUYING UP")
-#                 print(f"  BTC worth {btc_val}, want to buy ${want}, buying ${actual}")
-#                 api.buy(summary["id"], BTC, value=actual, dry_run=dry_run)
-#         time.sleep(frequency)

@@ -20,6 +20,10 @@ def _pos(api, k, v):
     return {"quantity": v, "value": price * v, "price": price}
 
 
+def _taxed(amt):
+    return round(amt - (amt * 0.0148), 2)
+
+
 class WealthsimpleApi:
     def __init__(self, email):
         if keyring.get_password("wealthsimple", email) is None:

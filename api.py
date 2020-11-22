@@ -15,6 +15,11 @@ def _quant(quantity, value, price):
     return quantity, quantity * price
 
 
+def _pos(api, k, v):
+    price = api.quote(k)["quote"]["amount"]
+    return {"quantity": v, "value": price * v, "price": price}
+
+
 class WealthsimpleApi:
     def __init__(self, email):
         if keyring.get_password("wealthsimple", email) is None:
@@ -156,15 +161,28 @@ class Crypto:
 
     def summary(self):
         res = self.API.accounts()["results"][0]
+
         return {
             "balance": res["current_balance"]["amount"],
             "available": res["available_to_withdraw"]["amount"],
             "withdrawn": res["withdrawn_earnings"]["amount"],
             "positions": {
-                k: (self.quote(k)["quote"]["amount"] * v)
-                for k, v in res["position_quantities"].items()
+                k: _pos(self, k, v) for k, v in res["position_quantities"].items()
             },
         }
+
+    def run(self, robot, frequency=60, dry_run=True):
+        print(f"Starting robot {robot}...")
+        print(f"  run every {frequency} seconds")
+        if dry_run:
+            print("  NO ACTUAL TRANSACTIONS")
+        try:
+            while True:
+                print(".", end="")
+                robot(self, dry_run=dry_run)
+                time.sleep(frequency)
+        except Exception:
+            return self
 
 
 class Dummy:
@@ -208,12 +226,19 @@ class Dummy:
     def quotes(self, security_ids):
         return self.__state
 
-    def tick(self):
+    def __tick(self):
         self.__state = self.__history.pop()
 
     def summary(self):
         s = self.__summary.copy()
-        s["positions"] = {
-            k: (self.quote(k)["quote"]["amount"] * v) for k, v in s["positions"].items()
-        }
+        s["positions"] = {k: _pos(self, k, v) for k, v in s["positions"].items()}
         return s
+
+    def run(self, robot):
+        print(f"Starting Dummy robot {robot}...")
+        while self.__history:
+            print(".", end="")
+            robot(self)
+            self.__tick()
+        print("")
+        return self

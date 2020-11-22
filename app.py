@@ -1,105 +1,27 @@
-import getpass
 import json
 import os
 import time
 
-import keyring
-import requests
-
+import api
 import util
-
-BTC = "sec-z-btc-4ca670cac10139ce8678b84836231606"
-ETH = "sec-z-eth-dc40261c82a191b11e53426aa25d91af"
+from util import BTC, ETH
 
 
 class Crypto:
     def __init__(self, email):
-        self.SECURITIES = [BTC, ETH]
-        if keyring.get_password("wealthsimple", email) is None:
-            password = getpass.getpass(prompt="Password: ")
-            keyring.set_password("wealthsimple", email, password)
-        else:
-            password = keyring.get_password("wealthsimple", email)
-        self.email = email
-        self.jar = requests.cookies.RequestsCookieJar()
-        self.login_res = self.login(password)
-        self.access_token = self.login_res.headers["X-Access-Token"]
-        self.refresh_token = self.login_res.headers["X-Refresh-Token"]
-
-    def _req(self, method, url, data=None):
-        headers = {"Authorization": self.access_token}
-        if data is None:
-            res = method(url, cookies=self.jar, headers=headers)
-        else:
-            res = method(url, cookies=self.jar, headers=headers, data=data)
-        if res.status_code == 200:
-            return res.json()
-        return res
-
-    def _get(self, url):
-        return self._req(requests.get, url)
-
-    def _post(self, url, data):
-        return self._req(requests.post, url)
-
-    def login(self, password):
-        otp = getpass.getpass(prompt="2FA Code: ")
-        return requests.post(
-            "https://trade-service.wealthsimple.com/auth/login",
-            {"email": self.email, "password": password, "otp": otp},
-            cookies=self.jar,
-        )
-
-    def accounts(self):
-        res = self._get("https://trade-service.wealthsimple.com/account/list")
-        if type(res) is "dict":
-            return res["results"]
-        return res
-
-    def orders(self):
-        return self._get("https://trade-service.wealthsimple.com/orders")
-
-    def place_order(self, security_id, quantity, order_type, dry_run=False):
-        order = {
-            "security_id": security_id,
-            "quantity": quantity,
-            "order_type": order_type,
-            "order_sub_type": "market",
-            "time_in_force": "day",
-        }
-        return self._post("https://trade-service.wealthsimple.com/orders", order)
+        self.API = api.WealthsimpleApi(email)
+        res = self.API.accounts()["results"][0]
+        self.ID = res["id"]
+        self.CUSTODIAN = res["custodian_account_number"]
 
     def buy(self, security_id, quantity=None, value=None, dry_run=False):
-        assert quantity or value
-        if quantity is None:
-            cur_price = self.security(security_id)["quote"]["amount"]
-            value / cur_price
-        return self.place_order(security_id, quantity, "buy_quantity", dry_run=dry_run)
+        return self.API.buy(self.ID, security_id, quantity, value, dry_run)
 
     def sell(self, security_id, quantity=None, value=None, dry_run=False):
-        assert quantity or value
-        if quantity is None:
-            cur_price = self.security(security_id)["quote"]["amount"]
-            value / cur_price
-        return self.place_order(security_id, quantity, "sell_quantity", dry_run=dry_run)
+        return self.API.buy(self.ID, security_id, quantity, value, dry_run)
 
-    def activity(self):
-        return self._get("https://trade-service.wealthsimple.com/account/activities")
-
-    def me(self):
-        return self._get("https://trade-service.wealthsimple.com/me")
-
-    def forex(self):
-        return self._get("https://trade-service.wealthsimple.com/forex")
-
-    def security(self, security_id):
-        return self._get(
-            f"https://trade-service.wealthsimple.com/securities/{security_id}"
-        )
-
-    # Higher level operations
     def quote(self, sec_id):
-        security = self.security(sec_id)
+        security = self.API.security(sec_id)
         return {
             "id": security["id"],
             "symbol": security["stock"]["symbol"],
@@ -108,14 +30,12 @@ class Crypto:
             "date": security["quote"]["quote_date"],
         }
 
-    def market_quote(self):
-        return [self.quote(s) for s in self.SECURITIES]
+    def quotes(self, security_ids):
+        return [self.quote(s) for s in security_ids]
 
-    def crypto_summary(self):
-        res = self.accounts()["results"][0]
+    def summary(self):
+        res = self.API.accounts()["results"][0]
         return {
-            "id": res["id"],
-            "custodian": res["custodian_account_number"],
             "balance": res["current_balance"]["amount"],
             "available": res["available_to_withdraw"]["amount"],
             "withdrawn": res["withdrawn_earnings"]["amount"],
@@ -126,7 +46,27 @@ class Crypto:
         }
 
 
-def scratch():
+class Dummy:
+    def __init__(self, history_file):
+        pass
+
+    def buy(self, account_id, security_id, quantity=None, value=None, dry_run=False):
+        pass
+
+    def sell(self, account_id, security_id, quantity=None, value=None, dry_run=False):
+        pass
+
+    def quote(self, security_id):
+        pass
+
+    def quotes(self, security_ids):
+        pass
+
+    def summary(self):
+        pass
+
+
+def _scratch():
     def _minimal(rec):
         return (
             rec["symbol"],
@@ -145,10 +85,44 @@ def scratch():
         yield (sym, (bamt - aamt, bask - aask, bbid - abid))
 
 
-def monitor(api, path="~/.pytrade/history.json"):
+def auto_balance_btc(
+    api, keep_at, frequency, buy_threshold=0.1, sell_threshold=0.1, dry_run=False
+):
+    sell_above = keep_at + (keep_at * sell_threshold)
+    buy_below = keep_at - (keep_at * buy_threshold)
+    print("Starting AUTO")
+    print(f"  run every {frequency} seconds")
+    print(f"  keep in <{buy_below}>{keep_at}<{sell_above}>...")
+    if dry_run:
+        print("  NO ACTUAL TRANSACTIONS")
     while True:
-        p = os.path.expanduser(path)
+        summary = api.summary()
+        btc_val = summary["positions"][BTC]
+
+        if btc_val > sell_above:
+            val = btc_val - keep_at
+            print("SELLING EXCESS")
+            print(f"  BTC worth {btc_val}; exceeds threshold of ${sell_above}")
+            print(f"  selling {val}")
+            api.sell(summary["id"], BTC, value=val, dry_run=dry_run)
+        elif buy_below > btc_val:
+            if 0 >= summary["balance"]:
+                print("CANT BUY")
+                print(f"  BTC worth {btc_val}, but don't have enough balance to top up")
+            else:
+                # TODO - the min of balance and available funds
+                want = keep_at - btc_val
+                actual = min(want, summary["balance"], summary["available"])
+                print("BUYING UP")
+                print(f"  BTC worth {btc_val}, want to buy ${want}, buying ${actual}")
+                api.buy(summary["id"], BTC, value=actual, dry_run=dry_run)
+        time.sleep(frequency)
+
+
+def monitor(api, path="~/.pytrade/history.json"):
+    p = os.path.expanduser(path)
+    while True:
         with open(p, "a") as f:
-            f.write(json.dumps(api.market_quote()))
+            f.write(json.dumps(api.quotes([BTC, ETH])))
             f.write("\n")
         time.sleep(60)

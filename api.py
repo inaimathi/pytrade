@@ -11,7 +11,7 @@ def _quant(quantity, value, price):
     assert quantity or value
     assert price
     if quantity is None:
-        return value / price, value
+        return round(value / price, 8), value
     return quantity, quantity * price
 
 

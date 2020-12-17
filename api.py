@@ -56,39 +56,38 @@ class WealthsimpleApi:
                 return res
         return res
 
-    def _get(self, url):
-        return self._req(requests.get, url)
+    def _get(self, path):
+        return self._req(requests.get, f"https://trade-service.wealthsimple.com/{path}")
 
-    def _post(self, url, data):
-        return self._req(requests.post, url, data)
+    def _post(self, path, data):
+        return self._req(
+            requests.post, f"https://trade-service.wealthsimple.com/{path}", data
+        )
 
     def login(self, password):
         otp = getpass.getpass(prompt="2FA Code: ")
         return requests.post(
-            "https://trade-service.wealthsimple.com/auth/login",
+            "auth/login",
             {"email": self.email, "password": password, "otp": otp},
             cookies=self.jar,
         )
 
     def refresh(self, force=False):
         if force or (time.time() - self.refreshed_at > (60 * 10)):
-            res = self._post(
-                "https://trade-service.wealthsimple.com/auth/refresh",
-                {"refresh_token": self.refresh_token},
-            )
+            res = self._post("auth/refresh", {"refresh_token": self.refresh_token})
             return self._tokens_from(res)
         return False
 
     def accounts(self):
         self.refresh()
-        res = self._get("https://trade-service.wealthsimple.com/account/list")
+        res = self._get("account/list")
         if type(res) is "dict":
             return res["results"]
         return res
 
     def orders(self):
         self.refresh()
-        return self._get("https://trade-service.wealthsimple.com/orders")
+        return self._get("orders")
 
     def place_order(self, account_id, security_id, quantity, order_type, dry_run=False):
         order = {
@@ -102,7 +101,7 @@ class WealthsimpleApi:
         if dry_run:
             return order
         self.refresh()
-        return self._post("https://trade-service.wealthsimple.com/orders", order)
+        return self._post("orders", order)
 
     def buy(self, account_id, security_id, quantity=None, value=None, dry_run=False):
         price = self.security(security_id)["quote"]["amount"]
@@ -120,21 +119,19 @@ class WealthsimpleApi:
 
     def activity(self):
         self.refresh()
-        return self._get("https://trade-service.wealthsimple.com/account/activities")
+        return self._get("account/activities")
 
     def me(self):
         self.refresh()
-        return self._get("https://trade-service.wealthsimple.com/me")
+        return self._get("me")
 
     def forex(self):
         self.refresh()
-        return self._get("https://trade-service.wealthsimple.com/forex")
+        return self._get("forex")
 
     def security(self, security_id):
         self.refresh()
-        return self._get(
-            f"https://trade-service.wealthsimple.com/securities/{security_id}"
-        )
+        return self._get(f"securities/{security_id}")
 
 
 class Crypto:
@@ -209,14 +206,14 @@ class Dummy:
         if security_id not in self.__summary["positions"]:
             self.__summary["positions"][security_id] = 0
         real_q, real_v = _quant(quantity, _taxed(v, 0.0148), price)
-        print(f"BUYING {q}({v})[{real_q}{real_v}] at ${price}")
+        print(f"\nBUYING {q}({v})[{real_q}{real_v}] at ${price}")
         self.__summary["positions"][security_id] += real_q
         return True
 
     def sell(self, security_id, quantity=None, value=None, dry_run=False):
         price = self.quote(security_id)["quote"]["amount"]
         q, v = _quant(quantity, value, price)
-        print(f"SELLING {q}({v})[({_taxed(v, 0.0152)}] at ${price}")
+        print(f"\nSELLING {q}({v})[({_taxed(v, 0.0152)}] at ${price}")
         self.__summary["positions"][security_id] -= q
         self.__summary["balance"] += _taxed(v, 0.0152)
         self.__summary["available"] += _taxed(v, 0.0152)

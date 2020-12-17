@@ -213,7 +213,7 @@ class Dummy:
     def sell(self, security_id, quantity=None, value=None, dry_run=False):
         price = self.quote(security_id)["quote"]["amount"]
         q, v = _quant(quantity, value, price)
-        print(f"\nSELLING {q}({v})[({_taxed(v, 0.0152)}] at ${price}")
+        print(f"\nSELLING {q}({v})[{_taxed(v, 0.0152)}] at ${price}")
         self.__summary["positions"][security_id] -= q
         self.__summary["balance"] += _taxed(v, 0.0152)
         self.__summary["available"] += _taxed(v, 0.0152)
@@ -235,6 +235,13 @@ class Dummy:
         s = self.__summary.copy()
         s["positions"] = {k: _pos(self, k, v) for k, v in s["positions"].items()}
         return s
+
+    def liquidate(self):
+        print("LIQUIDATING")
+        for k, sec in self.summary()["positions"].items():
+            if sec["quantity"]:
+                self.sell(k, quantity=sec["quantity"])
+        return self
 
     def run(self, robot):
         print(f"Starting Dummy robot {robot}...")

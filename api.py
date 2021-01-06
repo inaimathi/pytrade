@@ -67,7 +67,7 @@ class WealthsimpleApi:
     def login(self, password):
         otp = getpass.getpass(prompt="2FA Code: ")
         return requests.post(
-            "auth/login",
+            "https://trade-service.wealthsimple.com/auth/login",
             {"email": self.email, "password": password, "otp": otp},
             cookies=self.jar,
         )
@@ -81,7 +81,7 @@ class WealthsimpleApi:
     def accounts(self):
         self.refresh()
         res = self._get("account/list")
-        if type(res) is "dict":
+        if type(res) is dict:
             return res["results"]
         return res
 
@@ -137,7 +137,7 @@ class WealthsimpleApi:
 class Crypto:
     def __init__(self, email):
         self.API = WealthsimpleApi(email)
-        res = self.API.accounts()["results"][0]
+        res = self.API.accounts()[0]
         self.ID = res["id"]
         self.CUSTODIAN = res["custodian_account_number"]
 
@@ -182,7 +182,8 @@ class Crypto:
                 print(".", end="")
                 robot(self, dry_run=dry_run)
                 time.sleep(frequency)
-        except Exception:
+        except Exception as e:
+            print(e)
             return self
 
 

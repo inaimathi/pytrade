@@ -80,12 +80,52 @@ def mk_auto_balance_btc(keep_at, buy_threshold=0.1, sell_threshold=0.1):
     return _bot
 
 
-def mk_monitor(path="~/.pytrade/history.json"):
+def mk_monitor(path="~/.pytrade/history.json", ranges=None):
     p = os.path.expanduser(path)
 
     def _bot(api, dry_run=False):
+        if ranges:
+            for sec, (smin, smax) in ranges.items():
+                q = api.quote(sec)
+                amt = q["quote"]["amount"]
+                if amt > smax:
+                    msg = f"{sec} is HIGH(${amt}): SELL"
+                    print(msg)
+                    os.system(f"notify-send \"{msg}\"")
+                elif smin > amt:
+                    msg = f"{sec} is LOW(${amt}): BUY"
+                    print(msg)
+                    os.system(f"notify-send \"{msg}\"")
+
         with open(p, "a") as f:
             f.write(json.dumps(api.quotes([BTC, ETH])))
             f.write("\n")
 
     return _bot
+
+
+if __name__ == "__main__":
+    import api
+    from optparse import OptionParser
+
+    parser = OptionParser()
+    parser.add_option("--BTC", dest="BTC", default=None,
+                      help="An option to take a <min, max> pair for Bitcoin")
+    parser.add_option("--ETH", dest="ETH", default=None,
+                      help="An option to take a <min, max> pair for Bitcoin")
+
+    options, args = parser.parse_args()
+
+    def _pair_from_string(string,):
+        return [int(n) for n in string.split(",")]
+    rngs = {}
+    if options.ETH:
+        rngs[ETH] = _pair_from_string(options.ETH)
+    if options.BTC:
+        rngs[BTC] = _pair_from_string(options.BTC)
+
+    if not len(args) == 1:
+        exit(1)
+    email = args[0]
+    c = api.Crypto(email)
+    c.run(mk_monitor(ranges=rngs))
